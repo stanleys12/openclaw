@@ -59,6 +59,7 @@ const mocks = vi.hoisted(() => ({
   writeUpdatePostInstallDoctorResult: vi.fn(),
   service: vi.fn(),
   packageRoot: vi.fn<() => string | undefined>(),
+  configWarnings: [] as string[],
   restartedHealthy: true,
   emulateNativeInstall: true,
   servicePlatform: undefined as NodeJS.Platform | undefined,
@@ -162,7 +163,11 @@ vi.mock("../commands/doctor-platform-notes.js", () => ({
 }));
 
 vi.mock("../commands/doctor-config-flow.js", () => ({
-  loadAndMaybeMigrateDoctorConfig: async () => ({ cfg: mocks.config(), shouldWriteConfig: true }),
+  loadAndMaybeMigrateDoctorConfig: async () => ({
+    cfg: mocks.config(),
+    shouldWriteConfig: true,
+    ...(mocks.configWarnings.length ? { warnings: mocks.configWarnings } : {}),
+  }),
 }));
 
 vi.mock("../config/config.js", async (importOriginal) => ({
@@ -186,6 +191,7 @@ describe("runDoctorHealthFlow", () => {
   beforeEach(() => {
     mocks.config.mockReturnValue({});
     mocks.packageRoot.mockReturnValue(undefined);
+    mocks.configWarnings = [];
     mocks.service.mockReset();
     mocks.restartedHealthy = true;
     mocks.emulateNativeInstall = true;
@@ -195,6 +201,24 @@ describe("runDoctorHealthFlow", () => {
     mocks.outro.mockClear();
     mocks.runContributions.mockReset().mockResolvedValue(undefined);
     mocks.writeUpdatePostInstallDoctorResult.mockClear();
+  });
+
+  it("publishes recoverable plugin config repair warnings to the update parent", async () => {
+    mocks.configWarnings = ["Plugin example config repair failed; config was preserved."];
+    vi.stubEnv(
+      "OPENCLAW_UPDATE_POST_INSTALL_DOCTOR_RESULT_PATH",
+      "/tmp/openclaw-update-doctor-result.json",
+    );
+
+    await runDoctorHealthFlow({ log: vi.fn(), error: vi.fn(), exit: vi.fn() }, {});
+
+    expect(mocks.writeUpdatePostInstallDoctorResult).toHaveBeenCalledWith({
+      resultPath: "/tmp/openclaw-update-doctor-result.json",
+      result: {
+        status: "ok",
+        warnings: ["Plugin example config repair failed; config was preserved."],
+      },
+    });
   });
 
   it.each(
@@ -703,7 +727,14 @@ describe("runDoctorHealthFlow", () => {
     expect(mocks.outro).not.toHaveBeenCalledWith("Doctor complete.");
     expect(runtime.exit).toHaveBeenCalledWith(1);
     expect(runtime.exit).not.toHaveBeenCalledWith(86);
-    expect(mocks.writeUpdatePostInstallDoctorResult).not.toHaveBeenCalled();
+    expect(mocks.writeUpdatePostInstallDoctorResult).toHaveBeenCalledWith({
+      resultPath: "/tmp/openclaw-update-doctor-result.json",
+      result: {
+        status: "error",
+        reason: "config-write-refusal",
+        message: "Doctor config fixes were not applied: cron-owner-safety",
+      },
+    });
   });
 
   it.each([{ repair: true }, { yes: true }])(
@@ -745,7 +776,13 @@ describe("runDoctorHealthFlow", () => {
           expect(runtime.error).toHaveBeenCalledWith(
             expect.stringMatching(/Doctor.*database readiness.*schema version 17/),
           );
-          expect(mocks.writeUpdatePostInstallDoctorResult).not.toHaveBeenCalled();
+          expect(mocks.writeUpdatePostInstallDoctorResult).toHaveBeenCalledWith({
+            resultPath: state.path("advisory.json"),
+            result: expect.objectContaining({
+              status: "error",
+              reason: "required-migration",
+            }),
+          });
           expect(mocks.outro).not.toHaveBeenCalledWith("Doctor complete.");
           expect(runtime.log).toHaveBeenCalledWith(
             expect.stringContaining("still open in another process"),
