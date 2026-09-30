@@ -16,6 +16,7 @@ import {
   canonicalizePersistedUserMessageMedia,
   hasMeaningfulRetiredMediaCarrier,
 } from "../media/media-facts.js";
+import { readRetainedAgentDeletions } from "../state/agent-deletion-journal.read.js";
 import { AGENT_MEDIA_SCHEMA_VERSION } from "../state/openclaw-agent-db-contract.js";
 import { assertOpenClawAgentDatabaseOwner } from "../state/openclaw-agent-db-maintenance.js";
 import { registerOpenClawAgentDatabase } from "../state/openclaw-agent-db-registry.js";
@@ -622,12 +623,16 @@ export async function migrateLegacyMediaPersistence(
   const env = params.env ?? process.env;
   const changes: string[] = [];
   const warnings: string[] = [];
+  const notices: string[] = [];
+  const retainedDeletions = readRetainedAgentDeletions(env);
   try {
     await withAgentDatabaseMaintenanceLease({ env }, async () => {
       const targets = resolveAgentDatabaseMigrationTargets({
         changes,
         configuredAgentDatabaseTargets: params.configuredAgentDatabaseTargets ?? [],
         env,
+        notices,
+        retainedDeletions,
         warnings,
       });
       const seenPaths = new Set<string>();
@@ -717,5 +722,5 @@ export async function migrateLegacyMediaPersistence(
   } catch (error) {
     warnings.push(`Agent database maintenance deferred: ${String(error)}`);
   }
-  return { changes, warnings };
+  return notices.length > 0 ? { changes, warnings, notices } : { changes, warnings };
 }

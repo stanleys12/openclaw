@@ -423,11 +423,13 @@ export async function migrateHistoricalTranscriptDirectives(
   const env = params.env ?? process.env;
   const changes: string[] = [];
   const warnings: string[] = [];
+  const notices: string[] = [];
   try {
     const discoveredTargets = resolveAgentDatabaseMigrationTargets({
       changes,
       configuredAgentDatabaseTargets: params.configuredAgentDatabaseTargets ?? [],
       env,
+      notices,
       warnings,
     });
     const targets: typeof discoveredTargets = [];
@@ -449,7 +451,7 @@ export async function migrateHistoricalTranscriptDirectives(
       }
     }
     if (targets.length === 0) {
-      return { changes, warnings };
+      return notices.length > 0 ? { changes, warnings, notices } : { changes, warnings };
     }
     await withAgentDatabaseMaintenanceLease({ env }, async () => {
       for (const target of targets) {
@@ -473,5 +475,5 @@ export async function migrateHistoricalTranscriptDirectives(
   } catch (error) {
     warnings.push(`Skipped historical transcript directive migration: ${String(error)}`);
   }
-  return { changes, warnings };
+  return notices.length > 0 ? { changes, warnings, notices } : { changes, warnings };
 }
